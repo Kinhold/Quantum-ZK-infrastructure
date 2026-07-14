@@ -9,6 +9,15 @@ description = "Experimental provider-neutral prompt adapter for ZK source review
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
+license = "MIT"
+authors = [
+  { name = "Kinhold" }
+]
+
+[project.urls]
+Homepage = "https://kinhold.io"
+Repository = "https://github.com/Kinhold/Quantum-ZK-infrastructure"
+Issues = "https://github.com/Kinhold/Quantum-ZK-infrastructure/issues"
 
 [project.optional-dependencies]
 live = ["anthropic==0.116.0"]
