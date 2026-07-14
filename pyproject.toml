@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantum-zk-prompt-adapter"
+version = "0.1.0"
+description = "Experimental provider-neutral prompt adapter for ZK source review"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+live = ["anthropic==0.116.0"]
+
+[tool.setuptools]
+py-modules = ["claude_zk_integration"]

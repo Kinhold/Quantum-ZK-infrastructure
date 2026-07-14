@@ -1,56 +1,118 @@
-import anthropic
+"""Experimental, provider-neutral prompt adapter for reviewing ZK source code.
+
+The default provider is deterministic and offline. Live Anthropic access is an
+explicit opt-in so importing or testing this module never requires credentials.
+"""
+
+from __future__ import annotations
+
+import argparse
 import os
+from dataclasses import dataclass
+from typing import Protocol
 
-def load_dotenv():
-    # Load environment variables from a .env file
-    from dotenv import load_dotenv
-    load_dotenv()
 
-class ClaudeZKAssistant:
-    def __init__(self):
-        self.api_key = os.getenv('CLAUDE_API_KEY')
-        self.client = anthropic.Client(api_key=self.api_key)
+class TextProvider(Protocol):
+    """Small boundary implemented by offline and hosted text providers."""
 
-    def analyze_zk_proof(self, proof_code):
-        response = self.client.chat(
-            messages=[{'role': 'user', 'content': proof_code}],
-            model='claude-1', # or the appropriate Claude model
+    def complete(self, prompt: str) -> str:
+        """Return a response for ``prompt``."""
+
+
+@dataclass(frozen=True)
+class DryRunProvider:
+    """Deterministic provider used for local development and tests."""
+
+    def complete(self, prompt: str) -> str:
+        return (
+            "[dry-run] No request was sent. "
+            f"Prepared a {len(prompt)}-character review prompt."
         )
-        return response['choices'][0]['message']['content']
 
-    def generate_zk_template(self):
-        template = """
-        # Zero-Knowledge Proof Template
-        import snark
 
-        def prove():
-            # Example proof here
-            pass
+class AnthropicProvider:
+    """Optional adapter for the current Anthropic Messages API."""
 
-        def verify():
-            # Verification code here
-            pass
-        """
-        return template
+    def __init__(self, *, api_key: str, model: str, max_tokens: int = 800):
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY is required for live mode")
+        if not model:
+            raise ValueError("ANTHROPIC_MODEL is required for live mode")
 
-    def chat(self, prompt):
-        response = self.client.chat(
-            messages=[{'role': 'user', 'content': prompt}],
-            model='claude-1',
+        try:
+            from anthropic import Anthropic
+        except ImportError as error:
+            raise RuntimeError(
+                "Live mode requires the optional dependency: "
+                "python -m pip install '.[live]'"
+            ) from error
+
+        self._client = Anthropic(api_key=api_key)
+        self._model = model
+        self._max_tokens = max_tokens
+
+    def complete(self, prompt: str) -> str:
+        response = self._client.messages.create(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            messages=[{"role": "user", "content": prompt}],
         )
-        return response['choices'][0]['message']['content']
+        return "\n".join(
+            block.text for block in response.content if hasattr(block, "text")
+        )
 
-if __name__ == '__main__':
-    assistant = ClaudeZKAssistant()
-    # Generate template
-    zk_template = assistant.generate_zk_template()
-    print("Generated ZK Template:\n", zk_template)
-    
-    # Chat about zk-SNARKs security
-    conversation = assistant.chat("What are the security features of zk-SNARKs?")
-    print("Chat about zk-SNARK security:\n", conversation)
-    
-    # Analyze sample proof code
-    sample_proof = 'sample zk proof code goes here'
-    analysis = assistant.analyze_zk_proof(sample_proof)
-    print("Analysis of sample proof code:\n", analysis)
+
+@dataclass
+class ZKReviewAssistant:
+    """Build review prompts without claiming to verify a proof."""
+
+    provider: TextProvider
+
+    def analyze_source(self, source: str) -> str:
+        if not source.strip():
+            raise ValueError("source must not be empty")
+        prompt = (
+            "Review the following zero-knowledge circuit source. Identify likely "
+            "constraint, privacy, and input-validation risks. Do not claim that "
+            "the circuit or a proof is verified; recommend compiler tests and an "
+            "independent cryptographic review.\n\n"
+            f"{source}"
+        )
+        return self.provider.complete(prompt)
+
+    def chat(self, prompt: str) -> str:
+        if not prompt.strip():
+            raise ValueError("prompt must not be empty")
+        return self.provider.complete(prompt)
+
+
+def build_provider(*, live: bool) -> TextProvider:
+    if not live:
+        return DryRunProvider()
+    return AnthropicProvider(
+        api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+        model=os.getenv("ANTHROPIC_MODEL", ""),
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="send the prompt through Anthropic (requires explicit credentials)",
+    )
+    parser.add_argument(
+        "--source",
+        default="fn main(x: Field) { assert(x != 0); }",
+        help="circuit source to place in the review prompt",
+    )
+    args = parser.parse_args(argv)
+
+    assistant = ZKReviewAssistant(build_provider(live=args.live))
+    print(assistant.analyze_source(args.source))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
